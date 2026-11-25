@@ -1,0 +1,86 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: kioskita-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: root_password_kioskita
+      MYSQL_DATABASE: kioskita_db
+      MYSQL_USER: kioskita_user
+      MYSQL_PASSWORD: kioskita_pass
+    volumes:
+      - ./database/01_schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+      - ./database/02_seed.sql:/docker-entrypoint-initdb.d/02_seed.sql:ro
+      - mysql_data:/var/lib/mysql
+    networks:
+      - kioskita-internal
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-proot_password_kioskita"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  php-api:
+    build:
+      context: ./php-api
+      dockerfile: Dockerfile
+    container_name: kioskita-php-api
+    restart: unless-stopped
+    environment:
+      DB_HOST: mysql
+      DB_PORT: "3306"
+      DB_NAME: kioskita_db
+      DB_USER: kioskita_user
+      DB_PASS: kioskita_pass
+    networks:
+      - kioskita-internal
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  bun-api:
+    build:
+      context: ./bun-api
+      dockerfile: Dockerfile
+    container_name: kioskita-bun-api
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      PORT: "3000"
+      DB_HOST: mysql
+      DB_PORT: "3306"
+      DB_NAME: kioskita_db
+      DB_USER: kioskita_user
+      DB_PASS: kioskita_pass
+      PHP_API_URL: http://php-api
+      JWT_SECRET: kioskita-super-secret-jwt-key-2026
+    networks:
+      - kioskita-internal
+    depends_on:
+      mysql:
+        condition: service_healthy
+      php-api:
+        condition: service_started
+
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    container_name: kioskita-web
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    networks:
+      - kioskita-internal
+    depends_on:
+      - bun-api
+
+networks:
+  kioskita-internal:
+    driver: bridge
+
+volumes:
+  mysql_data:
+
